@@ -6,6 +6,7 @@
 #include <unordered_map>
 
 using std::cout;
+using std::wcout;
 using std::endl;
 
 template <typename F, size_t... I>
@@ -57,17 +58,24 @@ int main(int argc, char* argv[]) {
     for (wchar_t c; f.get(c); ) {
       if (std::isspace(c)) {
         if (!std::get<0>(key).empty() && !std::get<1>(key).empty()) {
-          size_t p = word.size();
-          for (; p; ) if (!std::ispunct(word[--p])) break;
-          ++p;
-          auto& next = map[key];
-          next.word  = word.substr(0,p);
-          for (size_t i=p; i<word.size(); ++i)
-            next.punct.insert(word[p]);
+          size_t a = 0, b = word.size();
+          for (; b; ) if (!std::ispunct(word[--b])) break;
+          for (; a<=b; ++a) if (!std::ispunct(word[a])) break;
+          ++b;
+          if (a==b) {
+            word.clear();
+          } else {
+            auto& next = map[key];
+            for (size_t i=b; i<word.size(); ++i)
+              next.punct.insert(word[i]);
+            next.word = word = word.substr(a,b-a);
+          }
         }
-        std::get<0>(key) = std::get<1>(key);
-        std::get<1>(key) = word;
-        word.clear();
+        if (!word.empty()) {
+          std::get<0>(key) = std::get<1>(key);
+          std::get<1>(key) = word;
+          word.clear();
+        }
       } else {
         word += std::tolower(c);
       }
@@ -75,8 +83,10 @@ int main(int argc, char* argv[]) {
   } // i
 
   for (const auto& x : map) {
-    std::wcout << "(" << x.first[0] << ',' << x.first[1] << ") = "
-      << x.second.word
-      << endl;
+    wcout << "(" << x.first[0] << ',' << x.first[1] << ") = "
+      << x.second.word << ' ';
+    for (auto c : x.second.punct)
+      wcout << c;
+    wcout << endl;
   }
 }
