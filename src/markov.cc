@@ -7,11 +7,12 @@
 #include <random>
 #include <chrono>
 
+#include <boost/lexical_cast.hpp>
+
 using std::cout;
-using std::wcout;
 using std::endl;
 using std::get;
-using namespace std::string_literals;
+// using namespace std::string_literals;
 
 template <typename F, size_t... I>
 void for_(F f, std::index_sequence<I...>) {
@@ -38,10 +39,10 @@ struct tuple_hash {
   }
 };
 
-struct word_properties {
-  // std::set<wchar_t> punct;
-  bool cap = true;
-};
+template <typename T>
+const auto& at(const T& container, unsigned i) {
+  return *std::next(container.begin(),i);
+}
 
 class select_rand_impl {
   std::mt19937 gen;
@@ -50,18 +51,27 @@ public:
   : gen(std::chrono::system_clock::now().time_since_epoch().count()) { }
   template <typename T>
   const auto& operator()(const T& container) {
-    auto it = container.begin();
     std::uniform_int_distribution<unsigned int> dist(0,container.size()-1);
-    std::advance(it,dist(gen));
-    return *it;
+    return at(container,dist(gen));
+  }
+  template <typename T>
+  const auto& operator()(const T& container, unsigned i) {
+    std::uniform_int_distribution<unsigned> dist(0,container.size()-1);
+    if (i>dist.b()) i = dist(gen);
+    cout << i << endl;
+    return at(container,i);
   }
 } select_rand;
 
-std::set<std::wstring> abbrev {{
-  L"mr"s, L"mrs"s, L"e.g"s
+std::set<std::string> abbrev {{
+  "Mr", "Mrs", "e.g"
 }};
 
-std::unordered_map<std::wstring,word_properties> dict;
+struct word_properties {
+  bool period = false;
+};
+
+std::unordered_map<std::string,word_properties> dict;
 struct dict_ptr {
   using type = decltype(dict)::value_type*;
   type value;
@@ -69,21 +79,21 @@ struct dict_ptr {
     value = ptr;
     return *this;
   }
-  auto operator* () const noexcept { return value->first; }
+  bool operator==(dict_ptr x) const noexcept { return value == x.value; }
+  bool operator< (dict_ptr x) const noexcept { return value <  x.value; }
+  auto& operator*() const noexcept { return value->first; }
   type operator->() const noexcept { return value; }
   operator bool() const noexcept { return value; }
 };
 namespace std {
 template <> struct hash<dict_ptr> {
-  size_t operator()(const dict_ptr& t) const {
-    return std::hash<dict_ptr::type>{}(t.value);
+  size_t operator()(const dict_ptr& ptr) const {
+    return std::hash<std::decay_t<decltype(*ptr)>>{}(*ptr);
   }
 };
 }
-std::basic_ostream<wchar_t>& operator<<(
-  std::basic_ostream<wchar_t>& wout, const dict_ptr& ptr
-) {
-  return wout << *ptr;
+std::ostream& operator<<(std::ostream& out, const dict_ptr& ptr) {
+  return out << *ptr;
 }
 std::array<dict_ptr,2> key;
 std::unordered_map<
@@ -98,71 +108,84 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  std::wstring word;
+  std::string word;
   dict_ptr dict_word;
-  std::locale::global(std::locale(""));
-  bool cap = true;
   for (int i=1; i<argc; ++i) {
-    std::wifstream f(argv[i]);
+    std::ifstream f(argv[i]);
 
-    for (wchar_t c; f.get(c); ) {
+    for (char c; f.get(c); ) {
       if (std::isspace(c)) {
-
         if (word.empty()) continue;
-        const auto last = word.back();
-        size_t a = 0, b = word.size();
-        for (; b; ) if (!std::ispunct(word[--b])) break;
-        for (; a<=b; ++a) if (!std::ispunct(word[a])) break;
-        ++b;
-        word = word.substr(a,b-a);
+
+        bool period = false;
+        while (word.back()=='.') {
+          word.pop_back();
+          period = true;
+        }
         if (word.empty()) continue;
         dict_word = &*dict.try_emplace(word).first;
+        if (period) dict_word->second.period = true;
 
         if (get<0>(key) && get<1>(key)) {
           map[key].insert(dict_word);
-          if (!cap) dict_word->second.cap = false;
-          if (last=='.' && !abbrev.count(word)) {
+          // cout <<'*'<< key[0] <<','<< key[1] << ": ";
+          // for (const auto& x : map[key]) cout <<' '<< x;
+          // cout << endl;
+          if (period && !abbrev.count(word)) {
             get<0>(key) = nullptr;
             get<1>(key) = nullptr;
+            dict_word   = nullptr;
           }
         }
         get<0>(key) = get<1>(key);
         get<1>(key) = dict_word;
         word.clear();
-        cap = true;
 
       } else {
-        const auto lc = std::tolower(c);
-        if (word.empty() && lc==c) cap = false;
-        word += lc;
+        word += c;
       }
     } // c
   } // i
 
-  wcout << "dict: " << dict.size() << endl;
-  wcout << "map : " << map.size() << endl;
+  cout << "dict: " << dict.size() << endl;
+  cout << "map : " << map.size() << endl;
 
   /*
   for (const auto& x : map) {
-    wcout << "(" << x.first[0] << ',' << x.first[1] << ") =";
+    cout << "(" << x.first[0] << ',' << x.first[1] << ") =";
     for (const auto& w : x.second)
-      wcout <<' '<< w;
-    wcout << endl;
+      cout <<' '<< w;
+    cout << endl;
   }
   */
 
-  auto& seed = select_rand(map);
-  key = seed.first;
-  dict_word = select_rand(seed.second);
+  for (std::string str; std::cin >> str; ) {
+    unsigned pos;
+    try {
+      pos = boost::lexical_cast<unsigned>(str);
+    } catch (std::exception& e) {
+      pos = 0;
+      for (const auto& x : map) {
+        const auto& key = x.first;
+        if (*get<0>(key)==str || *get<1>(key)==str)
+          cout << get<0>(key) << ' ' << get<1>(key) << ' ' << pos << endl;
+        ++pos;
+      }
+      continue;
+    }
+    auto& seed = select_rand(map,pos);
+    key = seed.first;
+    dict_word = select_rand(seed.second);
 
-  wcout << key[0] <<' '<< key[1] <<' '<< dict_word;
-  for (unsigned i=0; i<35; ++i) {
-    get<0>(key) = get<1>(key);
-    get<1>(key) = dict_word;
-    const auto it = map.find(key);
-    if (it==map.end()) break;
-    dict_word = select_rand(it->second);
-    wcout <<' '<< dict_word;
+    cout << key[0] <<' '<< key[1] <<' '<< dict_word;
+    for (unsigned i=0; i<35; ++i) {
+      get<0>(key) = get<1>(key);
+      get<1>(key) = dict_word;
+      const auto it = map.find(key);
+      if (it==map.end()) break;
+      dict_word = select_rand(it->second);
+      cout <<' '<< dict_word;
+    }
+    cout << endl;
   }
-  wcout << endl;
 }
